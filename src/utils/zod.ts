@@ -13,4 +13,10 @@ export const LoginUserSchema = z.object({
   password: z.string().min(6, "Password must be at least 6 characters"),
 });
 
-
+export const CreateHotelSchema = z.object({
+  name: z.string().min(2),
+  description: z.string().optional(),
+  city: z.string().min(2),
+  country: z.string().min(2),
+  amenities: z.array(z.string()).optional().default([]),
+});

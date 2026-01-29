@@ -1,8 +1,18 @@
-import { Request, Response } from "express";
-import { CreateUserSchema, LoginUserSchema } from "../utils/zod.js";
-import { ComparePassword, HashPassword, WriteJSON } from "../utils/utils.js";
+import { Request, response, Response } from "express";
+import {
+  CreateHotelSchema,
+  CreateUserSchema,
+  LoginUserSchema,
+} from "../utils/zod.js";
+import {
+  ComparePassword,
+  HashPassword,
+  WriteJSON,
+  AuthRequest,
+} from "../utils/utils.js";
 import { prisma } from "../utils/prisma.js";
 import jwt from "jsonwebtoken";
+
 export async function CreateUserController(req: Request, res: Response) {
   const result = CreateUserSchema.safeParse(req.body);
 
@@ -125,6 +135,67 @@ export async function LoginUserController(req: Request, res: Response) {
       200,
     );
   } catch (error) {
+    return WriteJSON(
+      res,
+      { success: false, data: null, error: "INTERNAL_SERVER_ERROR" },
+      500,
+    );
+  }
+}
+
+export async function CreateHotelController(req: AuthRequest, res: Response) {
+  if (!req.user) {
+    return WriteJSON(
+      res,
+      { success: false, data: null, error: "UNAUTHORIZED" },
+      401,
+    );
+  }
+
+  if (req.user.role !== "owner") {
+    return WriteJSON(
+      res,
+      { success: false, data: null, error: "FORBIDDEN" },
+      403,
+    );
+  }
+
+  const result = CreateHotelSchema.safeParse(req.body);
+
+  if (!result.success) {
+    return WriteJSON(
+      res,
+      { success: false, data: null, error: "INVALID_REQUEST" },
+      400,
+    );
+  }
+
+  try {
+    const hotel = await prisma.hotel.create({
+      data: {
+        ownerId: req.user.userId,
+        description: result.data.description ?? null,
+        city: result.data.city,
+        name: result.data.name,
+        country: result.data.country,
+        amenities: result.data.amenities,
+      },
+      select: {
+        id: true,
+        ownerId: true,
+        name: true,
+        description: true,
+        city: true,
+        country: true,
+        amenities: true,
+        rating: true,
+        totalReviews: true,
+      },
+    });
+
+    return WriteJSON(res, { success: true, data: hotel, error: null }, 201);
+  } catch (error) {
+    console.error(error);
     return WriteJSON(
       res,
       { success: false, data: null, error: "INTERNAL_SERVER_ERROR" },

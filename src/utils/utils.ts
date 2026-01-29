@@ -1,5 +1,5 @@
 import bcrypt from "bcrypt";
-import { Response } from "express";
+import { Request, Response } from "express";
 
 type JsonResponse = {
   success: boolean;
@@ -21,4 +21,11 @@ export async function HashPassword(password: string) {
 
 export async function ComparePassword(hash: string, password: string) {
   return await bcrypt.compare(password, hash);
+}
+
+export interface AuthRequest extends Request {
+  user?: {
+    userId: string;
+    role: "owner" | "customer";
+  };
 }
