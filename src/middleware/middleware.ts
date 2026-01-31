@@ -9,6 +9,8 @@ export async function AuthUserMiddleware(
 ) {
   const authHeader = req.headers.authorization;
 
+  console.log("Auth Header:", authHeader);
+
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return WriteJSON(
       res,
@@ -19,8 +21,21 @@ export async function AuthUserMiddleware(
 
   const token = authHeader.split(" ")[1];
 
+  console.log("Extracted Token:", token);
+  console.log("Token length:", token?.length);
+
+  if (!token) {
+    return WriteJSON(
+      res,
+      { success: false, data: null, error: "UNAUTHORIZED" },
+      401,
+    );
+  }
+
   try {
     const jwtSecret = process.env.JWT_SECRET;
+    console.log("JWT_SECRET exists:", !!jwtSecret);
+
     if (!jwtSecret) {
       return WriteJSON(
         res,
@@ -29,7 +44,7 @@ export async function AuthUserMiddleware(
       );
     }
 
-    const decoded = jwt.verify(token!, jwtSecret) as unknown as JwtPayload & {
+    const decoded = jwt.verify(token, jwtSecret) as JwtPayload & {
       userId: string;
       role: "owner" | "customer";
     };
@@ -41,9 +56,10 @@ export async function AuthUserMiddleware(
 
     next();
   } catch (error) {
+    console.log("JWT Verification Error:", error);
     return WriteJSON(
       res,
-      { success: false, data: null, error: "INVALID_TOKEN" },
+      { success: false, data: null, error: "UNAUTHORIZED" },
       401,
     );
   }

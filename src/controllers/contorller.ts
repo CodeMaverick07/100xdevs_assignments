@@ -65,7 +65,6 @@ export async function CreateUserController(req: Request, res: Response) {
 
     return WriteJSON(res, { success: true, data: user, error: null }, 201);
   } catch (error) {
-    console.error(error);
     return WriteJSON(
       res,
       { success: false, data: null, error: "INTERNAL_SERVER_ERROR" },
@@ -76,7 +75,6 @@ export async function CreateUserController(req: Request, res: Response) {
 
 export async function LoginUserController(req: Request, res: Response) {
   const result = LoginUserSchema.safeParse(req.body);
-  console.log(result);
   if (!result.success) {
     return WriteJSON(
       res,
@@ -86,8 +84,6 @@ export async function LoginUserController(req: Request, res: Response) {
   }
 
   const { email, password } = result.data;
-  console.log(email, password);
-  const hash = await HashPassword(password);
   try {
     const user = await prisma.user.findUnique({
       where: { email },
@@ -107,7 +103,7 @@ export async function LoginUserController(req: Request, res: Response) {
         401,
       );
     }
-    const isMatch = await ComparePassword(user.password, password);
+    const isMatch = await ComparePassword(password, user.password);
     if (!isMatch) {
       return WriteJSON(
         res,
@@ -199,7 +195,6 @@ export async function CreateHotelController(req: AuthRequest, res: Response) {
 
     return WriteJSON(res, { success: true, data: hotel, error: null }, 201);
   } catch (error) {
-    console.error(error);
     return WriteJSON(
       res,
       { success: false, data: null, error: "INTERNAL_SERVER_ERROR" },
@@ -229,8 +224,22 @@ export async function AddRoomToHotel(req: AuthRequest, res: Response) {
   }
   try {
     const hotelId = req.params.hotelId;
+
+    // FIX: Added validation for hotelId
+    if (!hotelId || typeof hotelId !== "string") {
+      return WriteJSON(
+        res,
+        {
+          success: false,
+          data: null,
+          error: "INVALID_REQUEST",
+        },
+        400,
+      );
+    }
+
     const hotel = await prisma.hotel.findUnique({
-      where: { id: hotelId as string },
+      where: { id: hotelId },
     });
     if (!hotel) {
       return WriteJSON(
@@ -243,7 +252,7 @@ export async function AddRoomToHotel(req: AuthRequest, res: Response) {
         404,
       );
     }
-    if (hotel.ownerId == req.user.userId) {
+    if (hotel.ownerId != req.user.userId) {
       return WriteJSON(
         res,
         {
@@ -254,7 +263,6 @@ export async function AddRoomToHotel(req: AuthRequest, res: Response) {
         403,
       );
     }
-
     const result = AddCreateRoomSchema.safeParse(req.body);
     if (!result.success) {
       return WriteJSON(
@@ -273,7 +281,7 @@ export async function AddRoomToHotel(req: AuthRequest, res: Response) {
       where: {
         hotelId_roomNumber: {
           roomNumber: data.roomNumber,
-          hotelId: hotelId as string,
+          hotelId: hotelId,
         },
       },
     });
@@ -292,7 +300,7 @@ export async function AddRoomToHotel(req: AuthRequest, res: Response) {
       data: {
         roomNumber: data.roomNumber,
         roomType: data.roomType,
-        hotelId: hotelId as string,
+        hotelId: hotelId,
         pricePerNight: data.pricePerNight,
         maxOccupancy: data.maxOccupancy,
       },
@@ -553,9 +561,14 @@ export async function CreateHotelBooking(req: AuthRequest, res: Response) {
         400,
       );
     }
+
+    // FIX: Improved date validation to allow bookings for today
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    if (data.checkInDate < today) {
+    const checkInStart = new Date(data.checkInDate);
+    checkInStart.setHours(0, 0, 0, 0);
+
+    if (checkInStart < today) {
       return WriteJSON(
         res,
         {
@@ -701,71 +714,96 @@ export async function CancelBookingForCustomer(
       403,
     );
   }
+  const bookingId = req.query.bookingId;
+  if (!bookingId || typeof bookingId !== "string") {
+    return WriteJSON(
+      res,
+      { success: false, data: null, error: "INVALID_BOOKING_ID" },
+      400,
+    );
+  }
+
   try {
-    const bookingId = req.query.bookingId;
     const booking = await prisma.booking.findUnique({
-      where: { id: bookingId as string },
+      where: { id: bookingId },
     });
+
     if (!booking) {
       return WriteJSON(
         res,
-        {
-          success: false,
-          data: null,
-          error: "BOOKING_NOT_FOUND",
-        },
+        { success: false, data: null, error: "BOOKING_NOT_FOUND" },
         404,
       );
     }
-    if (booking.userId != req.user.userId) {
+
+    if (booking.userId !== req.user.userId) {
       return WriteJSON(
         res,
-        {
-          success: false,
-          data: null,
-          error: "FORBIDDEN",
-        },
+        { success: false, data: null, error: "FORBIDDEN" },
         403,
       );
     }
-    if (booking.status == "cancelled") {
+
+    if (booking.status === "cancelled") {
       return WriteJSON(
         res,
-        {
-          success: false,
-          data: null,
-          error: "ALREADY_CANCELLED",
-        },
+        { success: false, data: null, error: "ALREADY_CANCELLED" },
         400,
       );
     }
-    const checkIn = new Date(booking.checkInDate).getTime();
+
+    const checkout = new Date(booking.checkOutDate);
+    checkout.setHours(23, 59, 59, 999);
+
+    if (checkout.getTime() < Date.now()) {
+      return WriteJSON(
+        res,
+        { success: false, data: null, error: "BOOKING_ALREADY_COMPLETED" },
+        400,
+      );
+    }
+
+    const checkInTime = new Date(booking.checkInDate).getTime();
     const now = Date.now();
     const HOURS_24 = 24 * 60 * 60 * 1000;
-    const isLessThan24HoursBeforeCheckIn = checkIn - now < HOURS_24;
-    if (isLessThan24HoursBeforeCheckIn) {
+
+    if (checkInTime - now < HOURS_24) {
       return WriteJSON(
         res,
-        {
-          success: false,
-          data: null,
-          error: "CANCELLATION_DEADLINE_PASSED",
-        },
+        { success: false, data: null, error: "CANCELLATION_DEADLINE_PASSED" },
         400,
       );
     }
-    const cancelledBooking = await prisma.booking.update({
-      where: { id: bookingId as string },
-      data: { status: "cancelled", cancelledAt: new Date() },
-      select: {
-        id: true,
-        status: true,
-        cancelledAt: true,
+    const result = await prisma.booking.updateMany({
+      where: {
+        id: bookingId,
+        status: "confirmed",
+      },
+      data: {
+        status: "cancelled",
+        cancelledAt: new Date(),
       },
     });
+
+    if (result.count === 0) {
+      return WriteJSON(
+        res,
+        { success: false, data: null, error: "BOOKING_NOT_CANCELLABLE" },
+        400,
+      );
+    }
+
     return WriteJSON(
       res,
-      { success: true, data: cancelledBooking, error: null },
+      {
+        success: true,
+        data: {
+          id: bookingId,
+          status: "cancelled",
+          cancelledAt: new Date(),
+        },
+        error: null,
+      },
       200,
     );
   } catch (error) {
@@ -824,7 +862,7 @@ export async function SubmitReviewAfterBooking(
         404,
       );
     }
-    if (booking?.status == "cancelled") {
+    if (booking?.status === "cancelled") {
       return WriteJSON(
         res,
         {
@@ -848,7 +886,7 @@ export async function SubmitReviewAfterBooking(
     }
     const checkoutTime = new Date(booking.checkOutDate).getTime();
     const now = Date.now();
-    if (checkoutTime >= now) {
+    if (checkoutTime > now) {
       return WriteJSON(
         res,
         {
@@ -861,8 +899,10 @@ export async function SubmitReviewAfterBooking(
     }
     const isReviewed = await prisma.review.findUnique({
       where: {
-        bookingId: data?.bookingId,
-        userId: req.user.userId,
+        userId_bookingId: {
+          userId: req.user.userId,
+          bookingId: data.bookingId,
+        },
       },
     });
     if (isReviewed) {
@@ -900,17 +940,31 @@ export async function SubmitReviewAfterBooking(
         totalReviews: true,
       },
     });
+
+    // FIX: Improved error message
+    if (hotel?.rating == null || hotel.totalReviews == null) {
+      return WriteJSON(
+        res,
+        {
+          success: false,
+          data: null,
+          error: "HOTEL_DATA_INVALID",
+        },
+        500,
+      );
+    }
+    const newTotalReviews = hotel.totalReviews + 1;
+
     const newRating =
-      Number(hotel?.rating) * Number(hotel?.totalReviews) +
-      data.rating / Number(hotel?.totalReviews) +
-      1;
+      (Number(hotel.rating) * hotel.totalReviews + data.rating) /
+      newTotalReviews;
     await prisma.hotel.update({
       where: {
         id: booking.hotelId,
       },
       data: {
         rating: newRating,
-        totalReviews: Number(hotel?.totalReviews) + 1,
+        totalReviews: newTotalReviews,
       },
     });
     return WriteJSON(res, { success: true, data: review, error: null }, 201);

@@ -30,10 +30,11 @@ export const AddCreateRoomSchema = z.object({
 
 export const CreateBookingSchema = z.object({
   roomId: z.string(),
-  checkInDate: z.date(),
-  checkOutDate: z.date(),
-  guests: z.number(),
+  checkInDate: z.coerce.date(),
+  checkOutDate: z.coerce.date(),
+  guests: z.number().positive(),
 });
+
 
 export const CreateReviewSchema = z.object({
   bookingId: z.string(),
