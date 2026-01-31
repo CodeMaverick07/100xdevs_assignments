@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import {
   AddCreateRoomSchema,
+  CreateBookingSchema,
   CreateHotelSchema,
   CreateUserSchema,
   LoginUserSchema,
@@ -14,6 +15,7 @@ import {
 import { prisma } from "../utils/prisma.js";
 import jwt from "jsonwebtoken";
 import { Prisma } from "@prisma/client";
+import { string } from "zod";
 
 export async function CreateUserController(req: Request, res: Response) {
   const result = CreateUserSchema.safeParse(req.body);
@@ -362,8 +364,8 @@ export async function GetHotelsByFilters(req: AuthRequest, res: Response) {
         },
       },
     });
-    const hotelsWithMinPrice = hotels.map((hotel) => {
-      const prices = hotel.rooms.map((r) => Number(r.pricePerNight));
+    const hotelsWithMinPrice = hotels.map((hotel: any) => {
+      const prices = hotel.rooms.map((r: any) => Number(r.pricePerNight));
       return {
         id: hotel.id,
         name: hotel.name,
@@ -393,9 +395,227 @@ export async function GetHotelsByFilters(req: AuthRequest, res: Response) {
 export async function GetHotelDetailsAndRoomDetails(
   req: AuthRequest,
   res: Response,
-) {}
+) {
+  if (!req.user) {
+    return WriteJSON(
+      res,
+      { success: false, data: null, error: "UNAUTHORIZED" },
+      401,
+    );
+  }
+  try {
+    const hotelId = req.params.hotelId;
+    const hotelsRoomData = await prisma.hotel.findFirst({
+      where: {
+        id: hotelId as string,
+      },
+      select: {
+        id: true,
+        ownerId: true,
+        name: true,
+        description: true,
+        city: true,
+        country: true,
+        amenities: true,
+        rating: true,
+        totalReviews: true,
+        rooms: {
+          select: {
+            id: true,
+            roomNumber: true,
+            roomType: true,
+            pricePerNight: true,
+            maxOccupancy: true,
+          },
+        },
+      },
+    });
+    if (!hotelsRoomData) {
+      return WriteJSON(
+        res,
+        {
+          success: false,
+          data: null,
+          error: "HOTEL_NOT_FOUND",
+        },
+        404,
+      );
+    }
+    return WriteJSON(
+      res,
+      { success: true, data: hotelsRoomData, error: null },
+      200,
+    );
+  } catch (error) {
+    return WriteJSON(
+      res,
+      { success: false, data: null, error: "INTERNAL_SERVER_ERROR" },
+      500,
+    );
+  }
+}
 
-export async function CreateHotelBooking(req: AuthRequest, res: Response) {}
+export async function CreateHotelBooking(req: AuthRequest, res: Response) {
+  if (!req.user) {
+    return WriteJSON(
+      res,
+      { success: false, data: null, error: "UNAUTHORIZED" },
+      401,
+    );
+  }
+
+  if (req.user.role !== "customer") {
+    return WriteJSON(
+      res,
+      { success: false, data: null, error: "FORBIDDEN" },
+      403,
+    );
+  }
+  try {
+    const result = CreateBookingSchema.safeParse(req.body);
+    if (!result.success) {
+      return WriteJSON(
+        res,
+        {
+          success: false,
+          data: null,
+          error: "INVALID_REQUEST",
+        },
+        400,
+      );
+    }
+    const data = result.data;
+    if (!data.roomId) {
+      return WriteJSON(
+        res,
+        {
+          success: false,
+          data: null,
+          error: "INVALID_REQUEST",
+        },
+        400,
+      );
+    }
+    const isRoomExist = await prisma.room.findUnique({
+      where: {
+        id: data.roomId,
+      },
+      select: {
+        hotelId: true,
+        maxOccupancy: true,
+        pricePerNight: true,
+      },
+    });
+    if (!isRoomExist) {
+      return WriteJSON(
+        res,
+        {
+          success: false,
+          data: null,
+          error: "ROOM_NOT_FOUND",
+        },
+        404,
+      );
+    }
+    if (isRoomExist.maxOccupancy < data.guests) {
+      return WriteJSON(
+        res,
+        {
+          success: false,
+          data: null,
+          error: "INVALID_CAPACITY",
+        },
+        400,
+      );
+    }
+    const bookingsForRoom = await prisma.booking.findMany({
+      where: {
+        roomId: data.roomId,
+      },
+      select: {
+        checkInDate: true,
+        checkOutDate: true,
+      },
+    });
+    const isOverlap = bookingsForRoom.some((r) => {
+      return (
+        r.checkInDate < data.checkOutDate && r.checkOutDate > data.checkInDate
+      );
+    });
+    if (isOverlap) {
+      return WriteJSON(
+        res,
+        {
+          success: false,
+          data: null,
+          error: "ROOM_NOT_AVAILABLE",
+        },
+        400,
+      );
+    }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (data.checkInDate < today) {
+      return WriteJSON(
+        res,
+        {
+          success: false,
+          data: null,
+          error: "INVALID_DATES",
+        },
+        400,
+      );
+    }
+    if (data.checkOutDate <= data.checkInDate) {
+      return WriteJSON(
+        res,
+        {
+          success: false,
+          data: null,
+          error: "INVALID_DATES",
+        },
+        400,
+      );
+    }
+    const nights =
+      (new Date(data.checkOutDate).getTime() -
+        new Date(data.checkInDate).getTime()) /
+      (1000 * 60 * 60 * 24);
+    const totalPrice = nights * Number(isRoomExist.pricePerNight);
+
+    const booking = await prisma.booking.create({
+      data: {
+        userId: req.user.userId,
+        roomId: data.roomId,
+        hotelId: isRoomExist.hotelId,
+        checkInDate: data.checkInDate,
+        checkOutDate: data.checkOutDate,
+        guests: data.guests,
+        totalPrice: totalPrice,
+        status: "confirmed",
+      },
+      select: {
+        id: true,
+        userId: true,
+        roomId: true,
+        hotelId: true,
+        checkInDate: true,
+        checkOutDate: true,
+        guests: true,
+        totalPrice: true,
+        status: true,
+        bookingDate: true,
+      },
+    });
+    return WriteJSON(res, { success: true, data: booking, error: null }, 201);
+  } catch (error) {
+    return WriteJSON(
+      res,
+      { success: false, data: null, error: "INTERNAL_SERVER_ERROR" },
+      500,
+    );
+  }
+}
 
 export async function GetAllBookingsByUser(req: AuthRequest, res: Response) {}
 
