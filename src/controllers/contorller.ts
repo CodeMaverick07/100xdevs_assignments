@@ -1,5 +1,6 @@
-import { Request, response, Response } from "express";
+import { Request, Response } from "express";
 import {
+  AddCreateRoomSchema,
   CreateHotelSchema,
   CreateUserSchema,
   LoginUserSchema,
@@ -12,6 +13,7 @@ import {
 } from "../utils/utils.js";
 import { prisma } from "../utils/prisma.js";
 import jwt from "jsonwebtoken";
+import { Prisma } from "@prisma/client";
 
 export async function CreateUserController(req: Request, res: Response) {
   const result = CreateUserSchema.safeParse(req.body);
@@ -203,3 +205,206 @@ export async function CreateHotelController(req: AuthRequest, res: Response) {
     );
   }
 }
+
+export async function AddRoomToHotel(req: AuthRequest, res: Response) {
+  if (!req.user) {
+    return WriteJSON(
+      res,
+      { success: false, data: null, error: "UNAUTHORIZED" },
+      401,
+    );
+  }
+  if (req.user?.role != "owner") {
+    return WriteJSON(
+      res,
+      {
+        success: false,
+        data: null,
+        error: "FORBIDDEN",
+      },
+      403,
+    );
+  }
+  try {
+    const hotelId = req.params.hotelId;
+    const hotel = await prisma.hotel.findUnique({
+      where: { id: hotelId as string },
+    });
+    if (!hotel) {
+      return WriteJSON(
+        res,
+        {
+          success: false,
+          data: null,
+          error: "HOTEL_NOT_FOUND",
+        },
+        404,
+      );
+    }
+    if (hotel.ownerId == req.user.userId) {
+      return WriteJSON(
+        res,
+        {
+          success: false,
+          data: null,
+          error: "FORBIDDEN",
+        },
+        403,
+      );
+    }
+
+    const result = AddCreateRoomSchema.safeParse(req.body);
+    if (!result.success) {
+      return WriteJSON(
+        res,
+        {
+          success: false,
+          data: null,
+          error: "INVALID_REQUEST",
+        },
+        400,
+      );
+    }
+    const data = result.data;
+
+    const isRoomExist = await prisma.room.findUnique({
+      where: {
+        hotelId_roomNumber: {
+          roomNumber: data.roomNumber,
+          hotelId: hotelId as string,
+        },
+      },
+    });
+    if (isRoomExist) {
+      return WriteJSON(
+        res,
+        {
+          success: false,
+          data: null,
+          error: "ROOM_ALREADY_EXISTS",
+        },
+        400,
+      );
+    }
+    const hotel_room = await prisma.room.create({
+      data: {
+        roomNumber: data.roomNumber,
+        roomType: data.roomType,
+        hotelId: hotelId as string,
+        pricePerNight: data.pricePerNight,
+        maxOccupancy: data.maxOccupancy,
+      },
+      select: {
+        id: true,
+        hotelId: true,
+        roomNumber: true,
+        roomType: true,
+        pricePerNight: true,
+        maxOccupancy: true,
+      },
+    });
+    return WriteJSON(
+      res,
+      { success: true, data: hotel_room, error: null },
+      201,
+    );
+  } catch (error) {
+    return WriteJSON(
+      res,
+      { success: false, data: null, error: "INTERNAL_SERVER_ERROR" },
+      500,
+    );
+  }
+}
+
+export async function GetHotelsByFilters(req: AuthRequest, res: Response) {
+  if (!req.user) {
+    return WriteJSON(
+      res,
+      { success: false, data: null, error: "UNAUTHORIZED" },
+      401,
+    );
+  }
+  try {
+    const { city, country, minPrice, maxPrice, minRating } = req.query;
+    const where: Prisma.HotelWhereInput = {
+      ...(city && { city: city as string }),
+      ...(country && { country: country as string }),
+      ...(minRating && { rating: { gte: Number(minRating) } }),
+      ...(minPrice || maxPrice
+        ? {
+            rooms: {
+              some: {
+                pricePerNight: {
+                  ...(minPrice && { gte: Number(minPrice) }),
+                  ...(maxPrice && { lte: Number(maxPrice) }),
+                },
+              },
+            },
+          }
+        : {}),
+    };
+    const hotels = await prisma.hotel.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        city: true,
+        country: true,
+        amenities: true,
+        rating: true,
+        totalReviews: true,
+        rooms: {
+          select: {
+            pricePerNight: true,
+          },
+        },
+      },
+    });
+    const hotelsWithMinPrice = hotels.map((hotel) => {
+      const prices = hotel.rooms.map((r) => Number(r.pricePerNight));
+      return {
+        id: hotel.id,
+        name: hotel.name,
+        description: hotel.description,
+        city: hotel.city,
+        country: hotel.country,
+        amenities: hotel.amenities,
+        rating: hotel.rating,
+        totalReviews: hotel.totalReviews,
+        minPricePerNight: prices.length ? Math.min(...prices) : null,
+      };
+    });
+    return WriteJSON(
+      res,
+      { success: true, data: hotelsWithMinPrice, error: null },
+      200,
+    );
+  } catch (error) {
+    return WriteJSON(
+      res,
+      { success: false, data: null, error: "INTERNAL_SERVER_ERROR" },
+      500,
+    );
+  }
+}
+
+export async function GetHotelDetailsAndRoomDetails(
+  req: AuthRequest,
+  res: Response,
+) {}
+
+export async function CreateHotelBooking(req: AuthRequest, res: Response) {}
+
+export async function GetAllBookingsByUser(req: AuthRequest, res: Response) {}
+
+export async function CancelBookingForCustomer(
+  req: AuthRequest,
+  res: Response,
+) {}
+
+export async function SubmitReviewAfterBooking(
+  req: AuthRequest,
+  res: Response,
+) {}

@@ -20,3 +20,23 @@ export const CreateHotelSchema = z.object({
   country: z.string().min(2),
   amenities: z.array(z.string()).optional().default([]),
 });
+
+export const AddCreateRoomSchema = z.object({
+  roomNumber: z.string(),
+  roomType: z.string(),
+  pricePerNight: z.number(),
+  maxOccupancy: z.number(),
+});
+
+export const CreateBookingSchema = z.object({
+  roomId: z.string(),
+  checkInDate: z.date(),
+  checkOutDate: z.date(),
+  guests: z.number(),
+});
+
+export const CreateReviewSchema = z.object({
+  bookingId: z.string(),
+  rating: z.number().min(0).max(5),
+  comment: z.string(),
+});
