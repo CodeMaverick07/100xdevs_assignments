@@ -3,6 +3,7 @@ import {
   AddCreateRoomSchema,
   CreateBookingSchema,
   CreateHotelSchema,
+  CreateReviewSchema,
   CreateUserSchema,
   LoginUserSchema,
 } from "../utils/zod.js";
@@ -14,8 +15,7 @@ import {
 } from "../utils/utils.js";
 import { prisma } from "../utils/prisma.js";
 import jwt from "jsonwebtoken";
-import { Prisma } from "@prisma/client";
-import { string } from "zod";
+import { Prisma, BookingStatus } from "@prisma/client";
 
 export async function CreateUserController(req: Request, res: Response) {
   const result = CreateUserSchema.safeParse(req.body);
@@ -617,14 +617,308 @@ export async function CreateHotelBooking(req: AuthRequest, res: Response) {
   }
 }
 
-export async function GetAllBookingsByUser(req: AuthRequest, res: Response) {}
+export async function GetAllBookingsByUser(req: AuthRequest, res: Response) {
+  if (!req.user) {
+    return WriteJSON(
+      res,
+      { success: false, data: null, error: "UNAUTHORIZED" },
+      401,
+    );
+  }
+
+  if (req.user.role !== "customer") {
+    return WriteJSON(
+      res,
+      { success: false, data: null, error: "FORBIDDEN" },
+      403,
+    );
+  }
+  try {
+    const statusRaw = req.query.status;
+    let status: BookingStatus | undefined;
+    if (Array.isArray(statusRaw)) {
+      status = statusRaw[0] as BookingStatus;
+    } else if (typeof statusRaw === "string") {
+      status = statusRaw as BookingStatus;
+    } else {
+      status = undefined;
+    }
+
+    const bookings = await prisma.booking.findMany({
+      where: {
+        userId: req.user.userId,
+        ...(status !== undefined ? { status } : {}),
+      },
+      select: {
+        id: true,
+        roomId: true,
+        hotelId: true,
+        checkInDate: true,
+        checkOutDate: true,
+        guests: true,
+        totalPrice: true,
+        status: true,
+        bookingDate: true,
+        hotel: {
+          select: {
+            name: true,
+          },
+        },
+        room: {
+          select: {
+            roomNumber: true,
+            roomType: true,
+          },
+        },
+      },
+    });
+    return WriteJSON(res, { success: true, data: bookings, error: null }, 200);
+  } catch (error) {
+    return WriteJSON(
+      res,
+      { success: false, data: null, error: "INTERNAL_SERVER_ERROR" },
+      500,
+    );
+  }
+}
 
 export async function CancelBookingForCustomer(
   req: AuthRequest,
   res: Response,
-) {}
+) {
+  if (!req.user) {
+    return WriteJSON(
+      res,
+      { success: false, data: null, error: "UNAUTHORIZED" },
+      401,
+    );
+  }
+
+  if (req.user.role !== "customer") {
+    return WriteJSON(
+      res,
+      { success: false, data: null, error: "FORBIDDEN" },
+      403,
+    );
+  }
+  try {
+    const bookingId = req.query.bookingId;
+    const booking = await prisma.booking.findUnique({
+      where: { id: bookingId as string },
+    });
+    if (!booking) {
+      return WriteJSON(
+        res,
+        {
+          success: false,
+          data: null,
+          error: "BOOKING_NOT_FOUND",
+        },
+        404,
+      );
+    }
+    if (booking.userId != req.user.userId) {
+      return WriteJSON(
+        res,
+        {
+          success: false,
+          data: null,
+          error: "FORBIDDEN",
+        },
+        403,
+      );
+    }
+    if (booking.status == "cancelled") {
+      return WriteJSON(
+        res,
+        {
+          success: false,
+          data: null,
+          error: "ALREADY_CANCELLED",
+        },
+        400,
+      );
+    }
+    const checkIn = new Date(booking.checkInDate).getTime();
+    const now = Date.now();
+    const HOURS_24 = 24 * 60 * 60 * 1000;
+    const isLessThan24HoursBeforeCheckIn = checkIn - now < HOURS_24;
+    if (isLessThan24HoursBeforeCheckIn) {
+      return WriteJSON(
+        res,
+        {
+          success: false,
+          data: null,
+          error: "CANCELLATION_DEADLINE_PASSED",
+        },
+        400,
+      );
+    }
+    const cancelledBooking = await prisma.booking.update({
+      where: { id: bookingId as string },
+      data: { status: "cancelled", cancelledAt: new Date() },
+      select: {
+        id: true,
+        status: true,
+        cancelledAt: true,
+      },
+    });
+    return WriteJSON(
+      res,
+      { success: true, data: cancelledBooking, error: null },
+      200,
+    );
+  } catch (error) {
+    return WriteJSON(
+      res,
+      { success: false, data: null, error: "INTERNAL_SERVER_ERROR" },
+      500,
+    );
+  }
+}
 
 export async function SubmitReviewAfterBooking(
   req: AuthRequest,
   res: Response,
-) {}
+) {
+  if (!req.user) {
+    return WriteJSON(
+      res,
+      { success: false, data: null, error: "UNAUTHORIZED" },
+      401,
+    );
+  }
+
+  if (req.user.role !== "customer") {
+    return WriteJSON(
+      res,
+      { success: false, data: null, error: "FORBIDDEN" },
+      403,
+    );
+  }
+  try {
+    const result = CreateReviewSchema.safeParse(req.body);
+    if (!result.success) {
+      return WriteJSON(
+        res,
+        {
+          success: false,
+          data: null,
+          error: "INVALID_REQUEST",
+        },
+        400,
+      );
+    }
+    const data = result.data;
+    const booking = await prisma.booking.findUnique({
+      where: { id: data?.bookingId as string },
+    });
+    if (!booking) {
+      return WriteJSON(
+        res,
+        {
+          success: false,
+          data: null,
+          error: "BOOKING_NOT_FOUND",
+        },
+        404,
+      );
+    }
+    if (booking?.status == "cancelled") {
+      return WriteJSON(
+        res,
+        {
+          success: false,
+          data: null,
+          error: "BOOKING_NOT_ELIGIBLE",
+        },
+        400,
+      );
+    }
+    if (booking?.userId != req.user.userId) {
+      return WriteJSON(
+        res,
+        {
+          success: false,
+          data: null,
+          error: "FORBIDDEN",
+        },
+        403,
+      );
+    }
+    const checkoutTime = new Date(booking.checkOutDate).getTime();
+    const now = Date.now();
+    if (checkoutTime >= now) {
+      return WriteJSON(
+        res,
+        {
+          success: false,
+          data: null,
+          error: "BOOKING_NOT_ELIGIBLE",
+        },
+        400,
+      );
+    }
+    const isReviewed = await prisma.review.findUnique({
+      where: {
+        bookingId: data?.bookingId,
+        userId: req.user.userId,
+      },
+    });
+    if (isReviewed) {
+      return WriteJSON(
+        res,
+        {
+          success: false,
+          data: null,
+          error: "ALREADY_REVIEWED",
+        },
+        400,
+      );
+    }
+    const review = await prisma.review.create({
+      data: {
+        userId: req.user.userId,
+        hotelId: booking.hotelId,
+        bookingId: booking.id,
+        rating: data!.rating,
+        comment: data?.comment,
+      },
+      select: {
+        userId: true,
+        bookingId: true,
+        hotelId: true,
+        rating: true,
+        comment: true,
+        createdAt: true,
+      },
+    });
+    const hotel = await prisma.hotel.findUnique({
+      where: { id: booking.hotelId },
+      select: {
+        rating: true,
+        totalReviews: true,
+      },
+    });
+    const newRating =
+      Number(hotel?.rating) * Number(hotel?.totalReviews) +
+      data.rating / Number(hotel?.totalReviews) +
+      1;
+    await prisma.hotel.update({
+      where: {
+        id: booking.hotelId,
+      },
+      data: {
+        rating: newRating,
+        totalReviews: Number(hotel?.totalReviews) + 1,
+      },
+    });
+    return WriteJSON(res, { success: true, data: review, error: null }, 201);
+  } catch (error) {
+    return WriteJSON(
+      res,
+      { success: false, data: null, error: "INTERNAL_SERVER_ERROR" },
+      500,
+    );
+  }
+}
