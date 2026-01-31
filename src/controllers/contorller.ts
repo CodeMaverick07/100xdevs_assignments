@@ -52,7 +52,7 @@ export async function CreateUserController(req: Request, res: Response) {
         email,
         password: hashedPassword,
         role,
-        phone,
+        phone: phone ?? null,
       },
       select: {
         id: true,

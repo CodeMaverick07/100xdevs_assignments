@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "tsc && node dist/index.js",
     "generate": "npx prisma generate --config src/prisma.config.ts",
+    "migrate":"npx prisma migrate dev --config src/prisma.config.ts --name init",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {

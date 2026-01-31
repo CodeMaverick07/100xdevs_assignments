@@ -5,7 +5,7 @@ export const CreateUserSchema = z.object({
   email: z.email("Invalid email format"),
   password: z.string().min(6, "Password must be at least 6 characters"),
   role: z.enum(["customer", "owner"]).optional(),
-  phone: z.string().min(10).max(15),
+  phone: z.string().min(10).max(15).optional(),
 });
 
 export const LoginUserSchema = z.object({
@@ -35,9 +35,8 @@ export const CreateBookingSchema = z.object({
   guests: z.number().positive(),
 });
 
-
 export const CreateReviewSchema = z.object({
   bookingId: z.string(),
-  rating: z.number().min(0).max(5),
+  rating: z.number().min(1).max(5),
   comment: z.string(),
 });
