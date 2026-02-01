@@ -28,12 +28,17 @@ export const AddCreateRoomSchema = z.object({
   maxOccupancy: z.number(),
 });
 
-export const CreateBookingSchema = z.object({
-  roomId: z.string(),
-  checkInDate: z.coerce.date(),
-  checkOutDate: z.coerce.date(),
-  guests: z.number().positive(),
-});
+export const CreateBookingSchema = z
+  .object({
+    roomId: z.string(),
+    checkInDate: z.coerce.date(),
+    checkOutDate: z.coerce.date(),
+    guests: z.number().positive(),
+  })
+  .refine((data) => data.checkOutDate > data.checkInDate, {
+    message: "Checkout date must be after check-in date",
+    path: ["checkOutDate"],
+  });
 
 export const CreateReviewSchema = z.object({
   bookingId: z.string(),

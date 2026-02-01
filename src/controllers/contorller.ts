@@ -16,6 +16,7 @@ import {
 import { prisma } from "../utils/prisma.js";
 import jwt from "jsonwebtoken";
 import { Prisma, BookingStatus } from "@prisma/client";
+import { number } from "zod";
 
 export async function CreateUserController(req: Request, res: Response) {
   const result = CreateUserSchema.safeParse(req.body);
@@ -192,8 +193,8 @@ export async function CreateHotelController(req: AuthRequest, res: Response) {
         totalReviews: true,
       },
     });
-
-    return WriteJSON(res, { success: true, data: hotel, error: null }, 201);
+    const response = { ...hotel, rating: Number(hotel.rating) };
+    return WriteJSON(res, { success: true, data: response, error: null }, 201);
   } catch (error) {
     return WriteJSON(
       res,
@@ -225,7 +226,6 @@ export async function AddRoomToHotel(req: AuthRequest, res: Response) {
   try {
     const hotelId = req.params.hotelId;
 
-    // FIX: Added validation for hotelId
     if (!hotelId || typeof hotelId !== "string") {
       return WriteJSON(
         res,
@@ -313,11 +313,11 @@ export async function AddRoomToHotel(req: AuthRequest, res: Response) {
         maxOccupancy: true,
       },
     });
-    return WriteJSON(
-      res,
-      { success: true, data: hotel_room, error: null },
-      201,
-    );
+    const response = {
+      ...hotel_room,
+      pricePerNight: Number(hotel_room.pricePerNight),
+    };
+    return WriteJSON(res, { success: true, data: response, error: null }, 201);
   } catch (error) {
     return WriteJSON(
       res,
@@ -337,6 +337,7 @@ export async function GetHotelsByFilters(req: AuthRequest, res: Response) {
   }
   try {
     const { city, country, minPrice, maxPrice, minRating } = req.query;
+
     const where: Prisma.HotelWhereInput = {
       ...(city && { city: city as string }),
       ...(country && { country: country as string }),
@@ -354,6 +355,10 @@ export async function GetHotelsByFilters(req: AuthRequest, res: Response) {
           }
         : {}),
     };
+    const roomWhere: any = {};
+    if (minPrice) roomWhere.gte = Number(minPrice);
+    if (maxPrice) roomWhere.lte = Number(maxPrice);
+
     const hotels = await prisma.hotel.findMany({
       where,
       select: {
@@ -369,9 +374,18 @@ export async function GetHotelsByFilters(req: AuthRequest, res: Response) {
           select: {
             pricePerNight: true,
           },
+          ...(minPrice || maxPrice
+            ? {
+                where: {
+                  pricePerNight:
+                    Object.keys(roomWhere).length > 0 ? roomWhere : undefined,
+                },
+              }
+            : {}),
         },
       },
     });
+
     const hotelsWithMinPrice = hotels.map((hotel: any) => {
       const prices = hotel.rooms.map((r: any) => Number(r.pricePerNight));
       return {
@@ -386,6 +400,7 @@ export async function GetHotelsByFilters(req: AuthRequest, res: Response) {
         minPricePerNight: prices.length ? Math.min(...prices) : null,
       };
     });
+
     return WriteJSON(
       res,
       { success: true, data: hotelsWithMinPrice, error: null },
@@ -449,12 +464,18 @@ export async function GetHotelDetailsAndRoomDetails(
         404,
       );
     }
-    return WriteJSON(
-      res,
-      { success: true, data: hotelsRoomData, error: null },
-      200,
-    );
+    const response = {
+      ...hotelsRoomData,
+      rating: Number(hotelsRoomData.rating),
+      rooms: hotelsRoomData.rooms.map((room) => ({
+        ...room,
+        pricePerNight: Number(room.pricePerNight),
+      })),
+    };
+    return WriteJSON(res, { success: true, data: response, error: null }, 200);
   } catch (error) {
+    console.log(error);
+
     return WriteJSON(
       res,
       { success: false, data: null, error: "INTERNAL_SERVER_ERROR" },
@@ -539,6 +560,7 @@ export async function CreateHotelBooking(req: AuthRequest, res: Response) {
     const bookingsForRoom = await prisma.booking.findMany({
       where: {
         roomId: data.roomId,
+        status: "confirmed",
       },
       select: {
         checkInDate: true,
@@ -561,8 +583,6 @@ export async function CreateHotelBooking(req: AuthRequest, res: Response) {
         400,
       );
     }
-
-    // FIX: Improved date validation to allow bookings for today
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const checkInStart = new Date(data.checkInDate);
@@ -620,8 +640,11 @@ export async function CreateHotelBooking(req: AuthRequest, res: Response) {
         bookingDate: true,
       },
     });
-    return WriteJSON(res, { success: true, data: booking, error: null }, 201);
+    const response = { ...booking, totalPrice: Number(booking.totalPrice) };
+    return WriteJSON(res, { success: true, data: response, error: null }, 201);
   } catch (error) {
+    console.log(error);
+
     return WriteJSON(
       res,
       { success: false, data: null, error: "INTERNAL_SERVER_ERROR" },
@@ -685,8 +708,17 @@ export async function GetAllBookingsByUser(req: AuthRequest, res: Response) {
         },
       },
     });
-    return WriteJSON(res, { success: true, data: bookings, error: null }, 200);
+    const response = bookings.map((book) => ({
+      ...book,
+      totalPrice: Number(book.totalPrice),
+      hotelName: book.hotel.name,
+      roomNumber: book.room.roomNumber,
+      roomType: book.room.roomType,
+    }));
+    return WriteJSON(res, { success: true, data: response, error: null }, 200);
   } catch (error) {
+    console.log(error);
+
     return WriteJSON(
       res,
       { success: false, data: null, error: "INTERNAL_SERVER_ERROR" },
@@ -714,7 +746,7 @@ export async function CancelBookingForCustomer(
       403,
     );
   }
-  const bookingId = req.query.bookingId;
+  const bookingId = req.params.bookingId;
   if (!bookingId || typeof bookingId !== "string") {
     return WriteJSON(
       res,
@@ -774,10 +806,10 @@ export async function CancelBookingForCustomer(
         400,
       );
     }
-    const result = await prisma.booking.updateMany({
+
+    const updatedBooking = await prisma.booking.update({
       where: {
         id: bookingId,
-        status: "confirmed",
       },
       data: {
         status: "cancelled",
@@ -785,28 +817,18 @@ export async function CancelBookingForCustomer(
       },
     });
 
-    if (result.count === 0) {
-      return WriteJSON(
-        res,
-        { success: false, data: null, error: "BOOKING_NOT_CANCELLABLE" },
-        400,
-      );
-    }
-
     return WriteJSON(
       res,
       {
         success: true,
-        data: {
-          id: bookingId,
-          status: "cancelled",
-          cancelledAt: new Date(),
-        },
+        data: updatedBooking,
         error: null,
       },
       200,
     );
   } catch (error) {
+    console.log(error);
+
     return WriteJSON(
       res,
       { success: false, data: null, error: "INTERNAL_SERVER_ERROR" },
@@ -941,7 +963,6 @@ export async function SubmitReviewAfterBooking(
       },
     });
 
-    // FIX: Improved error message
     if (hotel?.rating == null || hotel.totalReviews == null) {
       return WriteJSON(
         res,
@@ -969,6 +990,7 @@ export async function SubmitReviewAfterBooking(
     });
     return WriteJSON(res, { success: true, data: review, error: null }, 201);
   } catch (error) {
+    console.log(error);
     return WriteJSON(
       res,
       { success: false, data: null, error: "INTERNAL_SERVER_ERROR" },
