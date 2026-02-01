@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "tsc && node dist/index.js",
     "generate": "npx prisma generate --config src/prisma.config.ts",
-    "migrate":"npx prisma migrate dev --config src/prisma.config.ts --name init",
+    "migrate": "npx prisma migrate dev --config src/prisma.config.ts --name init",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
@@ -28,6 +28,7 @@
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.17.2",
     "prisma": "^7.3.0",
+    "vitest": "^4.0.18",
     "zod": "^4.3.6"
   },
   "devDependencies": {
