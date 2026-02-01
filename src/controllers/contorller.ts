@@ -474,8 +474,6 @@ export async function GetHotelDetailsAndRoomDetails(
     };
     return WriteJSON(res, { success: true, data: response, error: null }, 200);
   } catch (error) {
-    console.log(error);
-
     return WriteJSON(
       res,
       { success: false, data: null, error: "INTERNAL_SERVER_ERROR" },
@@ -643,8 +641,6 @@ export async function CreateHotelBooking(req: AuthRequest, res: Response) {
     const response = { ...booking, totalPrice: Number(booking.totalPrice) };
     return WriteJSON(res, { success: true, data: response, error: null }, 201);
   } catch (error) {
-    console.log(error);
-
     return WriteJSON(
       res,
       { success: false, data: null, error: "INTERNAL_SERVER_ERROR" },
@@ -717,8 +713,6 @@ export async function GetAllBookingsByUser(req: AuthRequest, res: Response) {
     }));
     return WriteJSON(res, { success: true, data: response, error: null }, 200);
   } catch (error) {
-    console.log(error);
-
     return WriteJSON(
       res,
       { success: false, data: null, error: "INTERNAL_SERVER_ERROR" },
@@ -827,8 +821,6 @@ export async function CancelBookingForCustomer(
       200,
     );
   } catch (error) {
-    console.log(error);
-
     return WriteJSON(
       res,
       { success: false, data: null, error: "INTERNAL_SERVER_ERROR" },
@@ -990,7 +982,6 @@ export async function SubmitReviewAfterBooking(
     });
     return WriteJSON(res, { success: true, data: review, error: null }, 201);
   } catch (error) {
-    console.log(error);
     return WriteJSON(
       res,
       { success: false, data: null, error: "INTERNAL_SERVER_ERROR" },
